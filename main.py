@@ -1,21 +1,64 @@
 import torch
-import numpy as np
+import torch.utils.data as tud
+import torch.nn as nn
+import pandas as pd
+from net import CNN
+from word_embeding import GloVe
+from torchtext.vocab import Vectors
 
+GLOVE_DATA_PATH = './data/glove.6B.50d.txt'
+TRAIN_DATA_PATH = './data/train.tsv'
+TEST_DATA_PATH = './data/test.tsv'
+ANS_DATA_PATH = './data/ans.csv'
+BATCH_SIZE = 64
+EPOCH = 20
+LR = 0.01
 
-def print_hi(name):
-    # 在下面的代码行中使用断点来调试脚本。
-    print(f'Hi, {name}')  # 按 Ctrl+F8 切换断点。
-
-
-# 按间距中的绿色按钮以运行脚本。
 if __name__ == '__main__':
-    print_hi('PyCharm')
-    np_data = np.arange(6).reshape((2, 3))
-    torch_data = torch.from_numpy(np_data)
-    tensor2array = torch_data.numpy()
-    print(
-        '\nnumpy array:', np_data,  # [[0 1 2], [3 4 5]]
-        '\ntorch tensor:', torch_data,  # 0  1  2 \n 3  4  5    [torch.LongTensor of size 2x3]
-        '\ntensor to array:', tensor2array,  # [[0 1 2], [3 4 5]]
+    glv = GloVe(GLOVE_DATA_PATH)
+    train_df = pd.read_csv(TRAIN_DATA_PATH, sep='\t')
+    x_data, y_data = train_df["Phrase"].values, train_df["Sentiment"].values
+    x_matrix = glv.get_matrix(x_data)
+    x_tensor = torch.from_numpy(x_matrix)
+    y_tensor = torch.from_numpy(y_data)
+    torch_dataset = tud.TensorDataset(x_tensor, y_tensor)
+    loader = tud.DataLoader(
+        dataset=torch_dataset,  # torch TensorDataset format
+        batch_size=BATCH_SIZE,  # mini batch size
+        shuffle=True,  # 要不要打乱数据 (打乱比较好)
+        num_workers=2,  # 多线程来读数据
     )
-# 访问 https://www.jetbrains.com/help/pycharm/ 获取 PyCharm 帮助
+
+    cnn = CNN()
+    cnn.cuda()
+    # print(cnn)
+    optimizer = torch.optim.Adam(cnn.parameters(), lr=LR)  # optimize all cnn parameters
+    loss_func = nn.CrossEntropyLoss()  # the target label is not one-hotted
+    # print("yes")
+    cnn.train()
+    torch.autograd.set_detect_anomaly(True)
+    for epoch in range(EPOCH):
+        for step, (b_x, b_y) in enumerate(loader):  # 每一步 loader 释放一小批数据用来学习
+            # print(b_x.shape)
+            b_x, b_y = b_x.cuda(), b_y.cuda()
+            b_x = b_x.unsqueeze(dim=1).type(torch.FloatTensor).cuda()
+            # print(b_x.shape)
+            output = cnn.forward(b_x)
+            loss = loss_func(output, b_y).cuda()
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+
+    cnn.eval()
+    train_df = pd.read_csv(TEST_DATA_PATH, sep='\t')
+    x_data, y_data = train_df["PhraseId"].values, train_df["Phrase"].values
+    y_matrix = glv.get_matrix(y_data)
+    y_tensor = torch.from_numpy(y_matrix).cuda()
+    # print(y_tensor, '\n', y_tensor.shape)
+    res = cnn(y_tensor.unsqueeze(dim=1).type(torch.FloatTensor).cuda())
+    # print(res)
+    res = torch.argmax(res, dim=1).cuda()
+    # print(res)
+    dataframe = pd.DataFrame({'PhraseId': x_data, 'Sentiment': res.cpu().detach().numpy()})
+    dataframe.to_csv(ANS_DATA_PATH, index=False, sep=',')
+
