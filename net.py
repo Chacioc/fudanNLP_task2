@@ -1,59 +1,30 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as tnf
 
 
 class CNN(torch.nn.Module):
-    def __init__(self):
+    def __init__(self, weight):
         super(CNN, self).__init__()
-        self.conv1 = nn.Sequential(  # input shape (1, 52, 50)
-            nn.Conv2d(
-                in_channels=1,  # input height
-                out_channels=56,  # n_filters
-                kernel_size=(2, 50),  # filter size
-            ),  # output shape (56, 51, 1)
-            nn.Tanh(),  # activation
-            nn.MaxPool2d((55, 1))    # output (56, 1, 1)
-        )
-        self.conv2 = nn.Sequential(
-            nn.Conv2d(
-                in_channels=1,  # input height
-                out_channels=56,  # n_filters
-                kernel_size=(3, 50),  # filter size
-            ),  # output shape (56, 50, 1)
-            nn.ReLU(),  # activation
-            nn.MaxPool2d((54, 1))  # output (56, 1, 1)
-        )
-        self.conv3 = nn.Sequential(
-            nn.Conv2d(
-                in_channels=1,  # input height
-                out_channels=56,  # n_filters
-                kernel_size=(4, 50),  # filter size
-            ),  # output shape (56, 50, 1)
-            nn.ReLU(),  # activation
-            nn.MaxPool2d((53, 1))  # output (56, 1, 1)
-        )
-        self.conv4 = nn.Sequential(
-            nn.Conv2d(
-                in_channels=1,  # input height
-                out_channels=56,  # n_filters
-                kernel_size=(5, 50),  # filter size
-            ),  # output shape (56, 50, 1)
-            nn.ReLU(),  # activation
-            nn.MaxPool2d((52, 1))  # output (56, 1, 1)
-        )
+        self.embed = nn.Embedding(len(weight), 50, _weight=weight)
+        self.convs = nn.ModuleList([
+            nn.Conv2d(1, 100, (k, 50), padding=(k - 1, 0))
+            for k in [2, 3, 4, 5]
+        ])
         self.dropout = nn.Dropout(0.5)
-        self.fc = nn.Linear(56 * 4, 5)
+        self.fc = nn.Linear(100 * 4, 5)
+
+    def conv_and_pool(self, x, conv):
+        x = tnf.relu(conv(x).squeeze(3))
+        x_max = tnf.max_pool1d(x, x.size(2)).squeeze(2)
+        return x_max
 
     def forward(self, x):
-        # print(self.conv1(x).shape)
-        x1 = self.conv1(x).squeeze()
-        x2 = self.conv2(x).squeeze()
-        x3 = self.conv3(x).squeeze()
-        x4 = self.conv4(x).squeeze()
-        x = torch.cat([x1, x2, x3, x4], dim=1)
-        x = self.dropout(x)
-        # print(x.shape)
-        return self.fc(x)
+        embed = self.embed(x).unsqueeze(1).type(torch.FloatTensor).cuda()
+        conv_results = [self.conv_and_pool(embed, conv) for conv in self.convs]
+
+        out = torch.cat(conv_results, 1)
+        return self.fc(self.dropout(out))
 
 
 class RNN(nn.Module):

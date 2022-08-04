@@ -4,7 +4,6 @@ import torch.nn as nn
 import pandas as pd
 from net import CNN
 from word_embeding import GloVe
-from torchtext.vocab import Vectors
 
 GLOVE_DATA_PATH = './data/glove.6B.50d.txt'
 TRAIN_DATA_PATH = './data/train.tsv'
@@ -17,9 +16,10 @@ LR = 0.01
 if __name__ == '__main__':
     glv = GloVe(GLOVE_DATA_PATH)
     train_df = pd.read_csv(TRAIN_DATA_PATH, sep='\t')
-    x_data, y_data = train_df["Phrase"].values, train_df["Sentiment"].values
+    x_data, y_data = train_df["Phrase"].values[0:100], train_df["Sentiment"].values[0:100]
     x_matrix = glv.get_matrix(x_data)
-    x_tensor = torch.from_numpy(x_matrix)
+    # print(x_matrix)
+    x_tensor = torch.LongTensor(x_matrix)
     y_tensor = torch.from_numpy(y_data)
     torch_dataset = tud.TensorDataset(x_tensor, y_tensor)
     loader = tud.DataLoader(
@@ -29,7 +29,8 @@ if __name__ == '__main__':
         num_workers=2,  # 多线程来读数据
     )
 
-    cnn = CNN()
+    print(glv.weight)
+    cnn = CNN(glv.weight)
     cnn.cuda()
     # print(cnn)
     optimizer = torch.optim.Adam(cnn.parameters(), lr=LR)  # optimize all cnn parameters
@@ -41,7 +42,6 @@ if __name__ == '__main__':
         for step, (b_x, b_y) in enumerate(loader):  # 每一步 loader 释放一小批数据用来学习
             # print(b_x.shape)
             b_x, b_y = b_x.cuda(), b_y.cuda()
-            b_x = b_x.unsqueeze(dim=1).type(torch.FloatTensor).cuda()
             # print(b_x.shape)
             output = cnn.forward(b_x)
             loss = loss_func(output, b_y).cuda()
@@ -51,9 +51,9 @@ if __name__ == '__main__':
 
     cnn.eval()
     train_df = pd.read_csv(TEST_DATA_PATH, sep='\t')
-    x_data, y_data = train_df["PhraseId"].values, train_df["Phrase"].values
+    x_data, y_data = train_df["PhraseId"].values[0:100], train_df["Phrase"].values[0:100]
     y_matrix = glv.get_matrix(y_data)
-    y_tensor = torch.from_numpy(y_matrix).cuda()
+    y_tensor = torch.LongTensor(y_matrix).cuda()
     # print(y_tensor, '\n', y_tensor.shape)
     res = cnn(y_tensor.unsqueeze(dim=1).type(torch.FloatTensor).cuda())
     # print(res)
